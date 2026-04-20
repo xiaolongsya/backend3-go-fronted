@@ -1,0 +1,20 @@
+{
+  "name": "backend3-go-fronted",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.9",
+    "vue-tsc": "^3.0.0"
+  }
+}
