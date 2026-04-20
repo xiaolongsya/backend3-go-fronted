@@ -521,4 +521,50 @@ onMounted(() => {
 .btn.ghost {
   background: #fff;
 }
+
+/* Mobile adaptation */
+@media (max-width: 640px) {
+  .page {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .card {
+    width: 100%;
+    height: 100vh;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .header {
+    padding: 10px 10px;
+  }
+
+  .chat {
+    padding: 12px;
+  }
+
+  .bubble {
+    max-width: 90%;
+  }
+
+  .menu {
+    width: min(92vw, 360px);
+    max-height: 50vh;
+  }
+
+  .composer {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .btn {
+    padding: 10px 10px;
+  }
+
+  .input {
+    padding: 10px 10px;
+  }
+}
 </style>

@@ -13,4 +13,12 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    proxy: {
+      '/v1': {
+        target: 'http://xiaolongya.cn:8091',
+        changeOrigin: true,
+      },
+    },
+  },
 })

@@ -42,6 +42,31 @@ function buildUrl(path: string) {
   return baseUrl.replace(/\/$/, '') + path
 }
 
+async function readResponseAsJsonOrText(resp: Response): Promise<{ json?: any; text?: string }> {
+  const contentType = resp.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    try {
+      return { json: await resp.json() }
+    } catch {
+      // fall through to text
+    }
+  }
+  try {
+    const text = await resp.text()
+    return { text }
+  } catch {
+    return { text: '' }
+  }
+}
+
+function explainNonJson(text: string | undefined, status: number) {
+  const head = (text || '').trim().slice(0, 80)
+  if (head.startsWith('<!doctype') || head.startsWith('<html') || head.includes('<html')) {
+    return `接口返回了 HTML（可能是前端服务的 index.html），请检查是否使用了 Vite 代理/或配置了 VITE_API_BASE_URL（status=${status}）`
+  }
+  return `接口返回非 JSON 内容（status=${status}）`
+}
+
 export async function fetchModels(): Promise<ModelsResponse> {
   const resp = await fetch(buildUrl('/v1/models'), {
     method: 'GET',
@@ -49,11 +74,15 @@ export async function fetchModels(): Promise<ModelsResponse> {
       Authorization: `Bearer ${apiToken}`,
     },
   })
-  const data = await resp.json()
+  const parsed = await readResponseAsJsonOrText(resp)
   if (!resp.ok) {
-    throw new Error(data?.error?.message || `Fetch models failed (${resp.status})`)
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Fetch models failed (${resp.status})`)
   }
-  return data as ModelsResponse
+  if (!parsed.json) {
+    throw new Error(explainNonJson(parsed.text, resp.status))
+  }
+  return parsed.json as ModelsResponse
 }
 
 export async function createChatCompletionNonStream(req: ChatCompletionRequest): Promise<ChatCompletionResponse> {
@@ -66,11 +95,15 @@ export async function createChatCompletionNonStream(req: ChatCompletionRequest):
     body: JSON.stringify({ ...req, stream: false }),
   })
 
-  const data = await resp.json()
+  const parsed = await readResponseAsJsonOrText(resp)
   if (!resp.ok) {
-    throw new Error(data?.error?.message || `Request failed (${resp.status})`)
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Request failed (${resp.status})`)
   }
-  return data as ChatCompletionResponse
+  if (!parsed.json) {
+    throw new Error(explainNonJson(parsed.text, resp.status))
+  }
+  return parsed.json as ChatCompletionResponse
 }
 
 // Minimal SSE parser: reads `data: ...` lines and calls onChunk with parsed JSON.
@@ -90,8 +123,9 @@ export async function createChatCompletionStream(
   })
 
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}))
-    throw new Error((data as any)?.error?.message || `Request failed (${resp.status})`)
+    const parsed = await readResponseAsJsonOrText(resp)
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Request failed (${resp.status})`)
   }
 
   if (!resp.body) {
