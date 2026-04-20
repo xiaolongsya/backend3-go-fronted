@@ -20,6 +20,7 @@ const selectedModelId = ref<string>('')
 
 const streamMode = ref(true)
 const inputText = ref('')
+const inputRef = ref<HTMLTextAreaElement | null>(null)
 
 const messages = ref<UiMessage[]>([])
 const loading = ref(false)
@@ -125,6 +126,24 @@ function toggleStream() {
   streamMode.value = !streamMode.value
 }
 
+function autosizeTextarea() {
+  const el = inputRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  const maxPx = 120
+  el.style.height = Math.min(el.scrollHeight, maxPx) + 'px'
+}
+
+function onComposerKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Enter') return
+  // Enter: newline (default)
+  // Ctrl/Cmd+Enter: send
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+    send()
+  }
+}
+
 function toChatMessagesForRequest(): ChatMessage[] {
   // Convert UI messages to API messages.
   // No system prompt to keep UX minimal.
@@ -145,6 +164,7 @@ async function send() {
   // push user message
   messages.value.push({ role: 'user', content: text })
   inputText.value = ''
+  autosizeTextarea()
 
   // build request messages BEFORE adding assistant placeholder
   const requestMessages = toChatMessagesForRequest()
@@ -254,6 +274,7 @@ onMounted(() => {
   loadModels().catch((e) => {
     errorText.value = e instanceof Error ? e.message : String(e)
   })
+  nextTick(() => autosizeTextarea())
 })
 </script>
 
@@ -306,13 +327,15 @@ onMounted(() => {
           {{ streamMode ? '流式' : '非流式' }}
         </button>
 
-        <input
+        <textarea
           v-model="inputText"
+          ref="inputRef"
           class="input"
-          type="text"
-          placeholder="输入消息..."
+          rows="1"
+          placeholder="输入消息...（回车换行，Ctrl/⌘+Enter 发送）"
           :disabled="loading"
-          @keydown.enter.prevent="send"
+          @keydown="onComposerKeydown"
+          @input="autosizeTextarea"
         />
 
         <button class="btn primary" type="button" :disabled="loading" @click="send">
@@ -370,6 +393,7 @@ onMounted(() => {
   border-radius: 10px;
   background: #fff;
   padding: 6px;
+  z-index: 10;
 }
 
 .menuItem {
@@ -497,6 +521,9 @@ onMounted(() => {
   border-radius: 10px;
   padding: 10px 12px;
   outline: none;
+  resize: none;
+  line-height: 1.35;
+  min-height: 40px;
 }
 
 .btn {
@@ -549,9 +576,18 @@ onMounted(() => {
     max-width: 90%;
   }
 
+  .model {
+    position: static;
+  }
+
   .menu {
-    width: min(92vw, 360px);
-    max-height: 50vh;
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 58px;
+    width: auto;
+    max-height: 55vh;
+    z-index: 50;
   }
 
   .composer {
