@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import {
   createChatCompletionNonStream,
   createChatCompletionStream,
@@ -28,6 +28,10 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 const messages = ref<UiMessage[]>([])
 const loading = ref(false)
 const errorText = ref<string>('')
+
+const chatRef = ref<HTMLDivElement | null>(null)
+const autoScroll = ref(true)
+let scrollRafId: number | null = null
 
 const listRef = ref<HTMLDivElement | null>(null)
 const abortController = ref<AbortController | null>(null)
@@ -90,12 +94,23 @@ function splitThinkDelta(
   return { visible, think }
 }
 
+function onChatScroll() {
+  const el = chatRef.value
+  if (!el) return
+  const distanceToBottom = el.scrollHeight - (el.scrollTop + el.clientHeight)
+  autoScroll.value = distanceToBottom < 40
+}
+
 function scrollToBottom() {
-  // Use nextTick so DOM reflects latest message content.
-  nextTick(() => {
-    const el = document.querySelector<HTMLElement>('.chat')
-    if (!el) return
-    el.scrollTop = el.scrollHeight
+  if (!autoScroll.value) return
+  if (scrollRafId != null) return
+  scrollRafId = window.requestAnimationFrame(() => {
+    scrollRafId = null
+    nextTick(() => {
+      const el = chatRef.value
+      if (!el) return
+      el.scrollTop = el.scrollHeight
+    })
   })
 }
 
@@ -243,12 +258,14 @@ async function send() {
     const flush = () => {
       rafId = null
       if (!pendingVisible && !pendingThink) return
+
+      const msg = messages.value[assistantIndex]
       if (pendingThink) {
-        messages.value[assistantIndex].think = (messages.value[assistantIndex].think || '') + pendingThink
+        msg.think = (msg.think || '') + pendingThink
         pendingThink = ''
       }
       if (pendingVisible) {
-        messages.value[assistantIndex].content += pendingVisible
+        msg.content = msg.content + pendingVisible
         pendingVisible = ''
       }
       scrollToBottom()
@@ -299,13 +316,6 @@ async function send() {
     loading.value = false
   }
 }
-
-watch(
-  () => messages.value.length,
-  () => {
-    scrollToBottom()
-  },
-)
 
 onMounted(() => {
   Promise.all([loadModels(), loadAllModels()]).catch((e) => {
@@ -382,7 +392,7 @@ onMounted(() => {
         </div>
       </header>
 
-      <main class="chat">
+      <main class="chat" ref="chatRef" @scroll.passive="onChatScroll">
         <div v-if="errorText" class="error">{{ errorText }}</div>
 
         <div v-if="messages.length === 0" class="empty">输入一句话开始聊天</div>
