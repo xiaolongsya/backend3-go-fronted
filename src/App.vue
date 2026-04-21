@@ -3,9 +3,11 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   createChatCompletionNonStream,
   createChatCompletionStream,
+  fetchAllModels,
   fetchModels,
   type ChatMessage,
   type ModelItem,
+  updateModelEnabled,
 } from './api'
 
 type UiMessage = {
@@ -15,6 +17,7 @@ type UiMessage = {
 }
 
 const models = ref<ModelItem[]>([])
+const allModels = ref<ModelItem[]>([])
 const modelMenuOpen = ref(false)
 const selectedModelId = ref<string>('')
 
@@ -28,6 +31,9 @@ const errorText = ref<string>('')
 
 const listRef = ref<HTMLDivElement | null>(null)
 const abortController = ref<AbortController | null>(null)
+
+const allModelsLoading = ref(false)
+const modelToggling = ref<Set<string>>(new Set())
 
 type ThinkFilterState = {
   inThink: boolean
@@ -99,8 +105,39 @@ async function loadModels() {
   errorText.value = ''
   const resp = await fetchModels()
   models.value = resp.data || []
-  if (!selectedModelId.value && models.value.length > 0) {
-    selectedModelId.value = models.value[0].id
+
+  // Keep selection valid
+  if (!selectedModelId.value) {
+    if (models.value.length > 0) selectedModelId.value = models.value[0].id
+    return
+  }
+  if (!models.value.some((m) => m.id === selectedModelId.value)) {
+    selectedModelId.value = models.value.length > 0 ? models.value[0].id : ''
+  }
+}
+
+async function loadAllModels() {
+  allModelsLoading.value = true
+  try {
+    const resp = await fetchAllModels()
+    allModels.value = resp.data || []
+  } finally {
+    allModelsLoading.value = false
+  }
+}
+
+async function toggleModel(modelId: string, enabled: boolean) {
+  if (modelToggling.value.has(modelId)) return
+  modelToggling.value.add(modelId)
+  try {
+    errorText.value = ''
+    await updateModelEnabled(modelId, enabled)
+    // refresh both lists
+    await Promise.all([loadAllModels(), loadModels()])
+  } catch (e) {
+    errorText.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    modelToggling.value.delete(modelId)
   }
 }
 
@@ -271,7 +308,7 @@ watch(
 )
 
 onMounted(() => {
-  loadModels().catch((e) => {
+  Promise.all([loadModels(), loadAllModels()]).catch((e) => {
     errorText.value = e instanceof Error ? e.message : String(e)
   })
   nextTick(() => autosizeTextarea())
@@ -280,11 +317,50 @@ onMounted(() => {
 
 <template>
   <div class="page">
-    <div class="card">
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sideHeader">
+          <div class="sideTitle">模型管理</div>
+        </div>
+
+        <div class="sideBody">
+          <div v-if="allModelsLoading" class="sideHint">加载中...</div>
+          <div v-else-if="allModels.length === 0" class="sideHint">暂无模型</div>
+
+          <div v-else class="modelList">
+            <div v-for="m in allModels" :key="m.id" class="modelRow">
+              <div class="modelName">{{ m.id }}</div>
+              <div class="modelOps">
+                <span class="dot" :class="m.enabled ? 'on' : 'off'" aria-hidden="true" />
+
+                <button
+                  class="btn tiny"
+                  type="button"
+                  :disabled="m.enabled || modelToggling.has(m.id)"
+                  @click="toggleModel(m.id, true)"
+                >
+                  启用
+                </button>
+                <button
+                  class="btn tiny"
+                  type="button"
+                  :disabled="!m.enabled || modelToggling.has(m.id)"
+                  @click="toggleModel(m.id, false)"
+                >
+                  禁用
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <div class="card">
       <header class="header">
         <div class="title">AI Chat</div>
 
         <div class="model">
+          <div class="modelLabel">可用模型</div>
           <button class="btn" type="button" @click="toggleModelMenu">
             {{ selectedModelLabel }}
           </button>
@@ -342,6 +418,7 @@ onMounted(() => {
           发送
         </button>
       </footer>
+      </div>
     </div>
   </div>
 </template>
@@ -350,13 +427,94 @@ onMounted(() => {
 .page {
   min-height: 100vh;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   padding: 24px;
 }
 
+.layout {
+  width: min(1200px, 100%);
+  display: flex;
+  gap: 12px;
+}
+
+.sidebar {
+  width: 340px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sideHeader {
+  padding: 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.sideTitle {
+  font-weight: 600;
+}
+
+.sideBody {
+  padding: 12px;
+  overflow: auto;
+}
+
+.sideHint {
+  opacity: 0.7;
+  font-size: 13px;
+}
+
+.modelList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.modelName {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelOps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.dot.on {
+  background: #16a34a;
+}
+
+.dot.off {
+  background: #b91c1c;
+}
+
 .card {
-  width: min(900px, 100%);
+  flex: 1;
   height: min(720px, 100vh - 48px);
   border: 1px solid #e5e7eb;
   border-radius: 12px;
@@ -380,6 +538,15 @@ onMounted(() => {
 
 .model {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modelLabel {
+  font-size: 12px;
+  opacity: 0.75;
+  white-space: nowrap;
 }
 
 .menu {
@@ -534,6 +701,12 @@ onMounted(() => {
   cursor: pointer;
 }
 
+.btn.tiny {
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -556,12 +729,29 @@ onMounted(() => {
     align-items: stretch;
   }
 
-  .card {
+  .layout {
     width: 100%;
     height: 100vh;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .sidebar {
+    width: 100%;
     border-radius: 0;
     border-left: 0;
     border-right: 0;
+    border-top: 0;
+    height: 38vh;
+  }
+
+  .card {
+    width: 100%;
+    height: 62vh;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
   }
 
   .header {

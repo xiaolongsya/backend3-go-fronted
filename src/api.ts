@@ -2,11 +2,20 @@ export type ModelItem = {
   id: string
   object?: string
   owned_by?: string
+  enabled?: boolean
 }
 
 export type ModelsResponse = {
   object: 'list'
   data: ModelItem[]
+}
+
+export type UpdateModelEnabledResponse = {
+  id: string
+  object?: string
+  created?: string
+  owned_by?: string
+  enabled: boolean
 }
 
 export type ChatMessage = {
@@ -83,6 +92,46 @@ export async function fetchModels(): Promise<ModelsResponse> {
     throw new Error(explainNonJson(parsed.text, resp.status))
   }
   return parsed.json as ModelsResponse
+}
+
+// fetchAllModels returns all models (enabled=0/1) for admin/model-management UI.
+export async function fetchAllModels(): Promise<ModelsResponse> {
+  const resp = await fetch(buildUrl('/v1/admin/models'), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+    },
+  })
+  const parsed = await readResponseAsJsonOrText(resp)
+  if (!resp.ok) {
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Fetch all models failed (${resp.status})`)
+  }
+  if (!parsed.json) {
+    throw new Error(explainNonJson(parsed.text, resp.status))
+  }
+  return parsed.json as ModelsResponse
+}
+
+export async function updateModelEnabled(modelId: string, enabled: boolean): Promise<UpdateModelEnabledResponse> {
+  const resp = await fetch(buildUrl(`/v1/admin/models/${encodeURIComponent(modelId)}`), {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiToken}`,
+    },
+    body: JSON.stringify({ enabled }),
+  })
+
+  const parsed = await readResponseAsJsonOrText(resp)
+  if (!resp.ok) {
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Update model failed (${resp.status})`)
+  }
+  if (!parsed.json) {
+    throw new Error(explainNonJson(parsed.text, resp.status))
+  }
+  return parsed.json as UpdateModelEnabledResponse
 }
 
 export async function createChatCompletionNonStream(req: ChatCompletionRequest): Promise<ChatCompletionResponse> {
