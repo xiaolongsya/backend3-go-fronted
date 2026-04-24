@@ -3,10 +3,15 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import {
   createChatCompletionNonStream,
   createChatCompletionStream,
+  deleteFile,
+  fetchFileMeta,
   fetchAllModels,
+  fetchFiles,
   fetchModels,
   type ChatMessage,
+  type FileObject,
   type ModelItem,
+  uploadFile,
   updateModelEnabled,
 } from './api'
 
@@ -38,6 +43,15 @@ const abortController = ref<AbortController | null>(null)
 
 const allModelsLoading = ref(false)
 const modelToggling = ref<Set<string>>(new Set())
+
+const files = ref<FileObject[]>([])
+const filesLoading = ref(false)
+const uploading = ref(false)
+const deleting = ref<Set<string>>(new Set())
+const purposeText = ref('assistants')
+const selectedUploadFile = ref<File | null>(null)
+const selectedFileMeta = ref<FileObject | null>(null)
+const filePanelOpen = ref(true)
 
 type ThinkFilterState = {
   inThink: boolean
@@ -138,6 +152,81 @@ async function loadAllModels() {
     allModels.value = resp.data || []
   } finally {
     allModelsLoading.value = false
+  }
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes)) return ''
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  const mb = kb / 1024
+  return `${mb.toFixed(1)} MB`
+}
+
+function formatUnix(ts: number) {
+  if (!Number.isFinite(ts) || ts <= 0) return ''
+  const d = new Date(ts * 1000)
+  return d.toLocaleString()
+}
+
+async function loadFiles() {
+  filesLoading.value = true
+  try {
+    const resp = await fetchFiles()
+    files.value = resp.data || []
+  } finally {
+    filesLoading.value = false
+  }
+}
+
+function onFilePick(e: Event) {
+  const input = e.target as HTMLInputElement
+  selectedUploadFile.value = input.files && input.files[0] ? input.files[0] : null
+}
+
+async function doUpload() {
+  if (!selectedUploadFile.value) {
+    errorText.value = '请先选择文件'
+    return
+  }
+  if (uploading.value) return
+
+  uploading.value = true
+  try {
+    errorText.value = ''
+    await uploadFile(selectedUploadFile.value, purposeText.value.trim())
+    selectedUploadFile.value = null
+    selectedFileMeta.value = null
+    await loadFiles()
+  } catch (e) {
+    errorText.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    uploading.value = false
+  }
+}
+
+async function showMeta(fileId: string) {
+  try {
+    errorText.value = ''
+    selectedFileMeta.value = await fetchFileMeta(fileId)
+  } catch (e) {
+    errorText.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function removeFile(fileId: string) {
+  if (deleting.value.has(fileId)) return
+  deleting.value.add(fileId)
+  try {
+    errorText.value = ''
+    await deleteFile(fileId)
+    if (selectedFileMeta.value?.id === fileId) selectedFileMeta.value = null
+    await loadFiles()
+  } catch (e) {
+    errorText.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    deleting.value.delete(fileId)
   }
 }
 
@@ -318,7 +407,7 @@ async function send() {
 }
 
 onMounted(() => {
-  Promise.all([loadModels(), loadAllModels()]).catch((e) => {
+  Promise.all([loadModels(), loadAllModels(), loadFiles()]).catch((e) => {
     errorText.value = e instanceof Error ? e.message : String(e)
   })
   nextTick(() => autosizeTextarea())
@@ -429,6 +518,81 @@ onMounted(() => {
         </button>
       </footer>
       </div>
+
+      <aside class="sidebar filesSidebar">
+        <div class="sideHeader filesHeader">
+          <div class="sideTitle">文件管理</div>
+          <button class="btn tiny" type="button" @click="filePanelOpen = !filePanelOpen">
+            {{ filePanelOpen ? '收起' : '展开' }}
+          </button>
+        </div>
+
+        <div v-if="filePanelOpen" class="sideBody">
+          <div class="uploadBox">
+            <div class="row">
+              <label class="label">purpose</label>
+              <input v-model="purposeText" class="textInput" type="text" placeholder="assistants" />
+            </div>
+            <div class="row">
+              <label class="label">file</label>
+              <input class="fileInput" type="file" @change="onFilePick" />
+            </div>
+            <div class="row ops">
+              <button class="btn primary" type="button" :disabled="uploading" @click="doUpload">
+                {{ uploading ? '上传中...' : '上传' }}
+              </button>
+              <button class="btn" type="button" :disabled="filesLoading" @click="loadFiles">
+                刷新
+              </button>
+            </div>
+            <div v-if="selectedUploadFile" class="hint">
+              已选择：{{ selectedUploadFile.name }}（{{ formatBytes(selectedUploadFile.size) }}）
+            </div>
+          </div>
+
+          <div class="filesList">
+            <div v-if="filesLoading" class="sideHint">加载中...</div>
+            <div v-else-if="files.length === 0" class="sideHint">暂无文件</div>
+
+            <div v-else class="fileRows">
+              <div v-for="f in files" :key="f.id" class="fileRow">
+                <div class="fileMain">
+                  <div class="fileName" :title="f.filename">{{ f.filename }}</div>
+                  <div class="fileSub">
+                    <span class="mono">{{ formatBytes(f.bytes) }}</span>
+                    <span class="sep">·</span>
+                    <span class="mono">{{ f.purpose || '-' }}</span>
+                  </div>
+                  <div class="fileId mono" :title="f.id">{{ f.id }}</div>
+                </div>
+
+                <div class="fileOps">
+                  <button class="btn tiny" type="button" @click="showMeta(f.id)">详情</button>
+                  <button
+                    class="btn tiny"
+                    type="button"
+                    :disabled="deleting.has(f.id)"
+                    @click="removeFile(f.id)"
+                  >
+                    {{ deleting.has(f.id) ? '删除中' : '删除' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="selectedFileMeta" class="metaBox">
+            <div class="metaTitle">元信息</div>
+            <div class="metaBody">
+              <div><span class="k">id</span> <span class="mono">{{ selectedFileMeta.id }}</span></div>
+              <div><span class="k">filename</span> {{ selectedFileMeta.filename }}</div>
+              <div><span class="k">bytes</span> <span class="mono">{{ formatBytes(selectedFileMeta.bytes) }}</span></div>
+              <div><span class="k">purpose</span> <span class="mono">{{ selectedFileMeta.purpose || '-' }}</span></div>
+              <div><span class="k">created_at</span> <span class="mono">{{ formatUnix(selectedFileMeta.created_at) }}</span></div>
+            </div>
+          </div>
+        </div>
+      </aside>
     </div>
   </div>
 </template>
@@ -449,7 +613,7 @@ onMounted(() => {
 }
 
 .sidebar {
-  width: 340px;
+  width: 300px;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #fff;
@@ -458,9 +622,20 @@ onMounted(() => {
   overflow: hidden;
 }
 
+.filesSidebar {
+  width: 300px;
+}
+
 .sideHeader {
   padding: 12px;
   border-bottom: 1px solid #e5e7eb;
+}
+
+.filesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .sideTitle {
@@ -532,6 +707,141 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.uploadBox {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.uploadBox .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.uploadBox .row.ops {
+  justify-content: flex-end;
+}
+
+.label {
+  width: 64px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.textInput {
+  flex: 1;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.fileInput {
+  flex: 1;
+  font-size: 13px;
+}
+
+.hint {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.filesList {
+  margin-top: 12px;
+}
+
+.fileRows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fileRow {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fileMain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fileName {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileSub {
+  font-size: 12px;
+  opacity: 0.75;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sep {
+  opacity: 0.6;
+}
+
+.fileId {
+  font-size: 12px;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.fileOps {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.metaBox {
+  margin-top: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.metaTitle {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.metaBody {
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metaBody .k {
+  display: inline-block;
+  width: 86px;
+  opacity: 0.75;
+}
+
+.mono {
+  font-family: ui-monospace, Consolas, monospace;
 }
 
 .header {

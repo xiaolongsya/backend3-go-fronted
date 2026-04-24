@@ -43,6 +43,26 @@ export type ChatCompletionResponse = {
   }>
 }
 
+export type FileObject = {
+  id: string
+  object?: 'file' | string
+  bytes: number
+  created_at: number
+  filename: string
+  purpose: string
+}
+
+export type FileListResponse = {
+  object: 'list'
+  data: FileObject[]
+}
+
+export type FileDeleteResponse = {
+  id: string
+  object?: 'file' | string
+  deleted: boolean
+}
+
 const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || ''
 const apiToken = (import.meta.env.VITE_API_TOKEN as string | undefined)?.trim() || 'xiaolong'
 
@@ -92,6 +112,88 @@ export async function fetchModels(): Promise<ModelsResponse> {
     throw new Error(explainNonJson(parsed.text, resp.status))
   }
   return parsed.json as ModelsResponse
+}
+
+export async function uploadFile(file: File, purpose: string): Promise<FileObject> {
+  const form = new FormData()
+  form.append('file', file)
+  if (purpose != null) form.append('purpose', String(purpose))
+
+  const resp = await fetch(buildUrl('/v1/files'), {
+    method: 'POST',
+    headers: {
+      // IMPORTANT: do NOT set Content-Type; browser will add multipart boundary.
+      Authorization: `Bearer ${apiToken}`,
+    },
+    body: form,
+  })
+
+  const parsed = await readResponseAsJsonOrText(resp)
+  if (!resp.ok) {
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Upload file failed (${resp.status})`)
+  }
+  if (!parsed.json) {
+    throw new Error(explainNonJson(parsed.text, resp.status))
+  }
+  return parsed.json as FileObject
+}
+
+export async function fetchFiles(): Promise<FileListResponse> {
+  const resp = await fetch(buildUrl('/v1/files'), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+    },
+  })
+
+  const parsed = await readResponseAsJsonOrText(resp)
+  if (!resp.ok) {
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Fetch files failed (${resp.status})`)
+  }
+  if (!parsed.json) {
+    throw new Error(explainNonJson(parsed.text, resp.status))
+  }
+  return parsed.json as FileListResponse
+}
+
+export async function fetchFileMeta(fileId: string): Promise<FileObject> {
+  const resp = await fetch(buildUrl(`/v1/files/${encodeURIComponent(fileId)}`), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+    },
+  })
+
+  const parsed = await readResponseAsJsonOrText(resp)
+  if (!resp.ok) {
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Fetch file failed (${resp.status})`)
+  }
+  if (!parsed.json) {
+    throw new Error(explainNonJson(parsed.text, resp.status))
+  }
+  return parsed.json as FileObject
+}
+
+export async function deleteFile(fileId: string): Promise<FileDeleteResponse> {
+  const resp = await fetch(buildUrl(`/v1/files/${encodeURIComponent(fileId)}`), {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+    },
+  })
+
+  const parsed = await readResponseAsJsonOrText(resp)
+  if (!resp.ok) {
+    const msg = parsed.json?.error?.message || parsed.json?.message
+    throw new Error(msg || parsed.text?.trim() || `Delete file failed (${resp.status})`)
+  }
+  if (!parsed.json) {
+    throw new Error(explainNonJson(parsed.text, resp.status))
+  }
+  return parsed.json as FileDeleteResponse
 }
 
 // fetchAllModels returns all models (enabled=0/1) for admin/model-management UI.
