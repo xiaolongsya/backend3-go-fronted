@@ -52,6 +52,11 @@ const purposeText = ref('assistants')
 const selectedUploadFile = ref<File | null>(null)
 const selectedFileMeta = ref<FileObject | null>(null)
 const filePanelOpen = ref(true)
+const mobilePanel = ref<'chat' | 'models' | 'files'>('chat')
+
+function showMobilePanel(panel: 'chat' | 'models' | 'files') {
+  mobilePanel.value = panel
+}
 
 type ThinkFilterState = {
   inThink: boolean
@@ -417,7 +422,19 @@ onMounted(() => {
 <template>
   <div class="page">
     <div class="layout">
-      <aside class="sidebar">
+      <div class="mobileTabs">
+        <button class="mobileTab" type="button" :class="{ active: mobilePanel === 'chat' }" @click="showMobilePanel('chat')">
+          对话
+        </button>
+        <button class="mobileTab" type="button" :class="{ active: mobilePanel === 'models' }" @click="showMobilePanel('models')">
+          模型
+        </button>
+        <button class="mobileTab" type="button" :class="{ active: mobilePanel === 'files' }" @click="showMobilePanel('files')">
+          文件
+        </button>
+      </div>
+
+      <aside class="sidebar pane pane-models" :class="{ active: mobilePanel === 'models' }">
         <div class="sideHeader">
           <div class="sideTitle">模型管理</div>
         </div>
@@ -454,7 +471,7 @@ onMounted(() => {
         </div>
       </aside>
 
-      <div class="card">
+      <div class="card pane pane-chat" :class="{ active: mobilePanel === 'chat' }">
       <header class="header">
         <div class="title">AI Chat</div>
 
@@ -519,7 +536,7 @@ onMounted(() => {
       </footer>
       </div>
 
-      <aside class="sidebar filesSidebar">
+      <aside class="sidebar filesSidebar pane pane-files" :class="{ active: mobilePanel === 'files' }">
         <div class="sideHeader filesHeader">
           <div class="sideTitle">文件管理</div>
           <button class="btn tiny" type="button" @click="filePanelOpen = !filePanelOpen">
@@ -610,6 +627,15 @@ onMounted(() => {
   width: min(1200px, 100%);
   display: flex;
   gap: 12px;
+  min-height: 0;
+}
+
+.mobileTabs {
+  display: none;
+}
+
+.pane {
+  min-height: 0;
 }
 
 .sidebar {
@@ -707,6 +733,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .uploadBox {
@@ -918,6 +945,7 @@ onMounted(() => {
 
 .chat {
   flex: 1;
+  min-height: 0;
   padding: 14px;
   overflow: auto;
   display: flex;
@@ -1043,43 +1071,95 @@ onMounted(() => {
 }
 
 /* Mobile adaptation */
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   .page {
     padding: 0;
     align-items: stretch;
+    height: 100svh;
+    overflow: hidden;
   }
 
   .layout {
     width: 100%;
-    height: 100vh;
+    height: 100%;
+    padding: 8px;
+    box-sizing: border-box;
+    display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 8px;
+    min-height: 0;
+    overflow: hidden;
   }
 
-  .sidebar {
-    width: 100%;
-    border-radius: 0;
-    border-left: 0;
-    border-right: 0;
-    border-top: 0;
-    height: 38vh;
+  .mobileTabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .mobileTab {
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .mobileTab.active {
+    background: #111827;
+    color: #fff;
+    border-color: #111827;
+  }
+
+  .pane {
+    display: none;
+  }
+
+  .pane.active {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   .card {
     width: 100%;
-    height: 62vh;
-    border-radius: 0;
-    border-left: 0;
-    border-right: 0;
-    border-bottom: 0;
+    height: 100%;
+    border-radius: 12px;
+    min-height: 0;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 12px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar .sideHeader {
+    flex: 0 0 auto;
+  }
+
+  .sideBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
   }
 
   .header {
     padding: 10px 10px;
+    gap: 8px;
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 
   .chat {
     padding: 12px;
+    flex: 1 1 auto;
   }
 
   .bubble {
@@ -1101,8 +1181,12 @@ onMounted(() => {
   }
 
   .composer {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: end;
     gap: 8px;
     padding: 10px;
+    background: #fff;
   }
 
   .btn {
@@ -1111,6 +1195,44 @@ onMounted(() => {
 
   .input {
     padding: 10px 10px;
+  }
+
+  .uploadBox .row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .label {
+    width: auto;
+  }
+
+  .fileRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .fileOps {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 480px) {
+  .composer {
+    grid-template-columns: 1fr auto;
+  }
+
+  .composer .btn.ghost {
+    grid-column: 1 / -1;
+  }
+
+  .title {
+    font-size: 15px;
+  }
+
+  .model {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 </style>
