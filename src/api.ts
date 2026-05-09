@@ -64,11 +64,17 @@ export type FileDeleteResponse = {
 }
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || ''
-const apiToken = (import.meta.env.VITE_API_TOKEN as string | undefined)?.trim() || 'xiaolong'
+const apiToken = (import.meta.env.VITE_API_TOKEN as string | undefined)?.trim() || 'test-token'
 
 function buildUrl(path: string) {
   if (!baseUrl) return path
   return baseUrl.replace(/\/$/, '') + path
+}
+
+function buildAuthHeaders(headers?: HeadersInit) {
+  const merged = new Headers(headers)
+  merged.set('Authorization', `Bearer ${apiToken}`)
+  return merged
 }
 
 async function readResponseAsJsonOrText(resp: Response): Promise<{ json?: any; text?: string }> {
@@ -88,6 +94,10 @@ async function readResponseAsJsonOrText(resp: Response): Promise<{ json?: any; t
   }
 }
 
+function extractErrorMessage(parsed: { json?: any; text?: string }, fallback: string) {
+  return parsed.json?.error?.message || parsed.json?.message || parsed.text?.trim() || fallback
+}
+
 function explainNonJson(text: string | undefined, status: number) {
   const head = (text || '').trim().slice(0, 80)
   if (head.startsWith('<!doctype') || head.startsWith('<html') || head.includes('<html')) {
@@ -96,22 +106,25 @@ function explainNonJson(text: string | undefined, status: number) {
   return `接口返回非 JSON 内容（status=${status}）`
 }
 
-export async function fetchModels(): Promise<ModelsResponse> {
-  const resp = await fetch(buildUrl('/v1/models'), {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-    },
+async function requestJson<T>(path: string, init: RequestInit, fallbackError: string): Promise<T> {
+  const resp = await fetch(buildUrl(path), {
+    ...init,
+    headers: buildAuthHeaders(init.headers),
   })
   const parsed = await readResponseAsJsonOrText(resp)
   if (!resp.ok) {
-    const msg = parsed.json?.error?.message || parsed.json?.message
-    throw new Error(msg || parsed.text?.trim() || `Fetch models failed (${resp.status})`)
+    throw new Error(extractErrorMessage(parsed, `${fallbackError} (${resp.status})`))
   }
   if (!parsed.json) {
     throw new Error(explainNonJson(parsed.text, resp.status))
   }
-  return parsed.json as ModelsResponse
+  return parsed.json as T
+}
+
+export async function fetchModels(): Promise<ModelsResponse> {
+  return requestJson<ModelsResponse>('/v1/models', {
+    method: 'GET',
+  }, 'Fetch models failed')
 }
 
 export async function uploadFile(file: File, purpose: string): Promise<FileObject> {
@@ -121,17 +134,13 @@ export async function uploadFile(file: File, purpose: string): Promise<FileObjec
 
   const resp = await fetch(buildUrl('/v1/files'), {
     method: 'POST',
-    headers: {
-      // IMPORTANT: do NOT set Content-Type; browser will add multipart boundary.
-      Authorization: `Bearer ${apiToken}`,
-    },
+    headers: buildAuthHeaders(),
     body: form,
   })
 
   const parsed = await readResponseAsJsonOrText(resp)
   if (!resp.ok) {
-    const msg = parsed.json?.error?.message || parsed.json?.message
-    throw new Error(msg || parsed.text?.trim() || `Upload file failed (${resp.status})`)
+    throw new Error(extractErrorMessage(parsed, `Upload file failed (${resp.status})`))
   }
   if (!parsed.json) {
     throw new Error(explainNonJson(parsed.text, resp.status))
@@ -140,121 +149,48 @@ export async function uploadFile(file: File, purpose: string): Promise<FileObjec
 }
 
 export async function fetchFiles(): Promise<FileListResponse> {
-  const resp = await fetch(buildUrl('/v1/files'), {
+  return requestJson<FileListResponse>('/v1/files', {
     method: 'GET',
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-    },
-  })
-
-  const parsed = await readResponseAsJsonOrText(resp)
-  if (!resp.ok) {
-    const msg = parsed.json?.error?.message || parsed.json?.message
-    throw new Error(msg || parsed.text?.trim() || `Fetch files failed (${resp.status})`)
-  }
-  if (!parsed.json) {
-    throw new Error(explainNonJson(parsed.text, resp.status))
-  }
-  return parsed.json as FileListResponse
+  }, 'Fetch files failed')
 }
 
 export async function fetchFileMeta(fileId: string): Promise<FileObject> {
-  const resp = await fetch(buildUrl(`/v1/files/${encodeURIComponent(fileId)}`), {
+  return requestJson<FileObject>(`/v1/files/${encodeURIComponent(fileId)}`, {
     method: 'GET',
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-    },
-  })
-
-  const parsed = await readResponseAsJsonOrText(resp)
-  if (!resp.ok) {
-    const msg = parsed.json?.error?.message || parsed.json?.message
-    throw new Error(msg || parsed.text?.trim() || `Fetch file failed (${resp.status})`)
-  }
-  if (!parsed.json) {
-    throw new Error(explainNonJson(parsed.text, resp.status))
-  }
-  return parsed.json as FileObject
+  }, 'Fetch file failed')
 }
 
 export async function deleteFile(fileId: string): Promise<FileDeleteResponse> {
-  const resp = await fetch(buildUrl(`/v1/files/${encodeURIComponent(fileId)}`), {
+  return requestJson<FileDeleteResponse>(`/v1/files/${encodeURIComponent(fileId)}`, {
     method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-    },
-  })
-
-  const parsed = await readResponseAsJsonOrText(resp)
-  if (!resp.ok) {
-    const msg = parsed.json?.error?.message || parsed.json?.message
-    throw new Error(msg || parsed.text?.trim() || `Delete file failed (${resp.status})`)
-  }
-  if (!parsed.json) {
-    throw new Error(explainNonJson(parsed.text, resp.status))
-  }
-  return parsed.json as FileDeleteResponse
+  }, 'Delete file failed')
 }
 
 // fetchAllModels returns all models (enabled=0/1) for admin/model-management UI.
 export async function fetchAllModels(): Promise<ModelsResponse> {
-  const resp = await fetch(buildUrl('/v1/admin/models'), {
+  return requestJson<ModelsResponse>('/v1/admin/models', {
     method: 'GET',
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-    },
-  })
-  const parsed = await readResponseAsJsonOrText(resp)
-  if (!resp.ok) {
-    const msg = parsed.json?.error?.message || parsed.json?.message
-    throw new Error(msg || parsed.text?.trim() || `Fetch all models failed (${resp.status})`)
-  }
-  if (!parsed.json) {
-    throw new Error(explainNonJson(parsed.text, resp.status))
-  }
-  return parsed.json as ModelsResponse
+  }, 'Fetch all models failed')
 }
 
 export async function updateModelEnabled(modelId: string, enabled: boolean): Promise<UpdateModelEnabledResponse> {
-  const resp = await fetch(buildUrl(`/v1/admin/models/${encodeURIComponent(modelId)}`), {
+  return requestJson<UpdateModelEnabledResponse>(`/v1/admin/models/${encodeURIComponent(modelId)}`, {
     method: 'PATCH',
-    headers: {
+    headers: buildAuthHeaders({
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiToken}`,
-    },
+    }),
     body: JSON.stringify({ enabled }),
-  })
-
-  const parsed = await readResponseAsJsonOrText(resp)
-  if (!resp.ok) {
-    const msg = parsed.json?.error?.message || parsed.json?.message
-    throw new Error(msg || parsed.text?.trim() || `Update model failed (${resp.status})`)
-  }
-  if (!parsed.json) {
-    throw new Error(explainNonJson(parsed.text, resp.status))
-  }
-  return parsed.json as UpdateModelEnabledResponse
+  }, 'Update model failed')
 }
 
 export async function createChatCompletionNonStream(req: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-  const resp = await fetch(buildUrl('/v1/chat/completions'), {
+  return requestJson<ChatCompletionResponse>('/v1/chat/completions', {
     method: 'POST',
-    headers: {
+    headers: buildAuthHeaders({
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiToken}`,
-    },
+    }),
     body: JSON.stringify({ ...req, stream: false }),
-  })
-
-  const parsed = await readResponseAsJsonOrText(resp)
-  if (!resp.ok) {
-    const msg = parsed.json?.error?.message || parsed.json?.message
-    throw new Error(msg || parsed.text?.trim() || `Request failed (${resp.status})`)
-  }
-  if (!parsed.json) {
-    throw new Error(explainNonJson(parsed.text, resp.status))
-  }
-  return parsed.json as ChatCompletionResponse
+  }, 'Request failed')
 }
 
 // Minimal SSE parser: reads `data: ...` lines and calls onChunk with parsed JSON.
@@ -265,10 +201,9 @@ export async function createChatCompletionStream(
 ): Promise<void> {
   const resp = await fetch(buildUrl('/v1/chat/completions'), {
     method: 'POST',
-    headers: {
+    headers: buildAuthHeaders({
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiToken}`,
-    },
+    }),
     body: JSON.stringify({ ...req, stream: true }),
     signal,
   })
